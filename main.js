@@ -4,7 +4,7 @@ var express = require("express");
 var bodyParser = require('body-parser');
 var WebSocket = require("ws");
 
-var http_port = process.env.HTTP_PORT || 3001;
+var http_port = process.env.HTTP_PORT || 8080;
 var p2p_port = process.env.P2P_PORT || 6001;
 var initialPeers = process.env.PEERS ? process.env.PEERS.split(',') : [];
 
@@ -25,19 +25,46 @@ var MessageType = {
     RESPONSE_BLOCKCHAIN: 2
 };
 
+
+var calculateHashForBlock = (block) => {
+    return calculateHash(block.index, block.previousHash, block.timestamp, block.data);
+};
+
+var calculateHash = (index, previousHash, timestamp, data) => {
+    return CryptoJS.SHA256(index + previousHash + timestamp + data).toString();
+};
+
 var getGenesisBlock = () => {
-    return new Block(0, "0", 1465154705, "my genesis block!!", "816534932c2b7154836da6afc367695e6337db8a921823784c14378abed4f7d7");
+    let nextIndex = 0;
+    let previousHash = "0";
+    let nextTimestamp = 0;
+    let data = {
+        "light": false,
+        "aircondictioner": false,
+        "television": false
+    };
+
+    var nextHash = calculateHash(nextIndex, previousHash, nextTimestamp, data);
+    return new Block(nextIndex, previousHash, nextTimestamp, data, nextHash);
 };
 
 var blockchain = [getGenesisBlock()];
 
 var initHttpServer = () => {
     var app = express();
+
     app.use(bodyParser.json());
 
+    app.use(function (req, res, next) {
+        res.header("Access-Control-Allow-Origin", "*");
+        res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+        next();
+    });
+
     app.get('/blocks', (req, res) => res.send(JSON.stringify(blockchain)));
+
     app.post('/mineBlock', (req, res) => {
-        var newBlock = generateNextBlock(req.body.data);
+        let newBlock = generateNextBlock(req.body.data);
         addBlock(newBlock);
         broadcast(responseLatestMsg());
         console.log('block added: ' + JSON.stringify(newBlock));
@@ -50,12 +77,19 @@ var initHttpServer = () => {
         connectToPeers([req.body.peer]);
         res.send();
     });
+
+    app.get('/file', (req, res) => {
+        let file = req.query.source;
+        res.sendFile(`${__dirname}/${file}`);
+    });
+
+    app.get('/', (req, res) => res.sendFile(`${__dirname}/index.html`));
     app.listen(http_port, () => console.log('Listening http on port: ' + http_port));
 };
 
 
 var initP2PServer = () => {
-    var server = new WebSocket.Server({port: p2p_port});
+    var server = new WebSocket.Server({ port: p2p_port });
     server.on('connection', ws => initConnection(ws));
     console.log('listening websocket p2p port on: ' + p2p_port);
 
@@ -105,13 +139,6 @@ var generateNextBlock = (blockData) => {
 };
 
 
-var calculateHashForBlock = (block) => {
-    return calculateHash(block.index, block.previousHash, block.timestamp, block.data);
-};
-
-var calculateHash = (index, previousHash, timestamp, data) => {
-    return CryptoJS.SHA256(index + previousHash + timestamp + data).toString();
-};
 
 var addBlock = (newBlock) => {
     if (isValidNewBlock(newBlock, getLatestBlock())) {
@@ -192,9 +219,9 @@ var isValidChain = (blockchainToValidate) => {
 };
 
 var getLatestBlock = () => blockchain[blockchain.length - 1];
-var queryChainLengthMsg = () => ({'type': MessageType.QUERY_LATEST});
-var queryAllMsg = () => ({'type': MessageType.QUERY_ALL});
-var responseChainMsg = () =>({
+var queryChainLengthMsg = () => ({ 'type': MessageType.QUERY_LATEST });
+var queryAllMsg = () => ({ 'type': MessageType.QUERY_ALL });
+var responseChainMsg = () => ({
     'type': MessageType.RESPONSE_BLOCKCHAIN, 'data': JSON.stringify(blockchain)
 });
 var responseLatestMsg = () => ({
